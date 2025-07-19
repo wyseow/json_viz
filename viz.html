@@ -239,11 +239,12 @@
         // Extract highlight phrases from the Highlighted Match
         const highlightPhrasesList = extractHighlightPhrases(highlightSource);
 
-        // Highlight in research areas and publication summary
+        // Highlight in research areas, publication summary, and awarded grants
         const dir = highlightPhrases(result.dir_research_area || "", highlightPhrasesList);
         const cv = highlightPhrases(result.cv_research_area || "", highlightPhrasesList);
         const open = highlightPhrases(result.open_research_area || "", highlightPhrasesList);
         const pub = highlightPhrases(result.publication_summary || "", highlightPhrasesList);
+        const grants = highlightPhrases(result.awarded_grants_str || "", highlightPhrasesList);
 
         const html = `
           <div class="result">
@@ -260,6 +261,7 @@
               <div><span class="field-label">CV Research Area:</span> <span class="field-content">${cv || "–"}</span></div>
               <div><span class="field-label">Open Research Area:</span> <span class="field-content">${open || "–"}</span></div>
               <div><span class="field-label">Publication Summary:</span> <span class="field-content">${pub || "–"}</span></div>
+              <div><span class="field-label">Awarded Grants:</span> <span class="field-content">${grants || "–"}</span></div>
             </div>
           </div>
         `;
