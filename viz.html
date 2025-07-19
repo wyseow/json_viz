@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Azure AI Search JSON Visualizer</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      padding: 20px;
+    }
+    h2, h3 {
+      margin-top: 0;
+    }
+    #json-input {
+      width: 100%;
+      font-family: monospace;
+      font-size: 14px;
+      padding: 8px;
+      border-radius: 6px;
+      border: 1px solid #aaa;
+      box-sizing: border-box;
+      margin-bottom: 0.5rem;
+    }
+    #visualize-btn {
+      margin: 10px 0 20px 0;
+      padding: 8px 18px;
+      background: #0078d4;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 15px;
+    }
+    #visualize-btn:hover {
+      background: #005ea2;
+    }
+    #drop-area {
+      border: 2px dashed #999;
+      border-radius: 10px;
+      padding: 30px;
+      text-align: center;
+      color: #666;
+      margin-bottom: 20px;
+    }
+    #drop-area.hover {
+      border-color: #333;
+      background: #f9f9f9;
+    }
+    .result {
+      border-bottom: 1px solid #ccc;
+      margin-bottom: 2rem;
+      padding-bottom: 1rem;
+    }
+    em {
+      background-color: yellow;
+      font-style: normal;
+      font-weight: bold;
+    }
+    #search-term {
+      font-size: 18px;
+      margin-bottom: 20px;
+      color: #333;
+    }
+    .toggle-btn {
+      background-color: #0078d4;
+      color: white;
+      border: none;
+      padding: 6px 10px;
+      cursor: pointer;
+      margin-top: 8px;
+      border-radius: 4px;
+    }
+    .toggle-btn:hover {
+      background-color: #005ea2;
+    }
+    .collapsible {
+      display: none;
+      margin-top: 10px;
+    }
+    .field-label {
+      font-weight: bold;
+      margin-top: 5px;
+    }
+    .field-content {
+      margin-left: 10px;
+    }
+  </style>
+</head>
+<body>
+  <h2>Azure AI Search Highlight Viewer</h2>
+  <div id="drop-area">📂 Drop your Azure AI Search JSON file here</div>
+  <div>
+    <textarea id="json-input" rows="7" placeholder="Paste Azure AI Search JSON here"></textarea><br>
+    <button id="visualize-btn">Visualize</button>
+  </div>
+  <div id="search-term"></div>
+  <div id="results"></div>
+
+  <script>
+    // Prevent default drag-and-drop behaviors
+    ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+      document.addEventListener(eventName, e => e.preventDefault());
+    });
+
+    const dropArea = document.getElementById("drop-area");
+    const resultsContainer = document.getElementById("results");
+    const searchTermDiv = document.getElementById("search-term");
+    const jsonInput = document.getElementById("json-input");
+    const visualizeBtn = document.getElementById("visualize-btn");
+
+    dropArea.addEventListener("dragover", e => {
+      e.preventDefault();
+      dropArea.classList.add("hover");
+    });
+
+    dropArea.addEventListener("dragleave", () => {
+      dropArea.classList.remove("hover");
+    });
+
+    dropArea.addEventListener("drop", e => {
+      e.preventDefault();
+      dropArea.classList.remove("hover");
+      const file = e.dataTransfer.files[0];
+      if (file && file.name.endsWith(".json")) {
+        const reader = new FileReader();
+        reader.onload = e => {
+          try {
+            const json = JSON.parse(e.target.result);
+            visualizeResults(json);
+          } catch (err) {
+            alert("❌ Invalid JSON file");
+          }
+        };
+        reader.readAsText(file);
+      } else {
+        alert("❌ Please drop a valid .json file");
+      }
+    });
+
+    // Paste-to-visualize support
+    visualizeBtn.addEventListener("click", () => {
+      let value = jsonInput.value.trim();
+      if (!value) {
+        alert("Please paste some JSON.");
+        return;
+      }
+      try {
+        const json = JSON.parse(value);
+        visualizeResults(json);
+      } catch (err) {
+        alert("❌ Invalid JSON pasted!");
+      }
+    });
+
+    function toggleCollapsible(btn) {
+      const content = btn.nextElementSibling;
+      const isVisible = content.style.display === "block";
+      content.style.display = isVisible ? "none" : "block";
+      btn.textContent = isVisible ? "Show Research Areas" : "Hide Research Areas";
+    }
+
+    function escapeRegExp(str) {
+      return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    }
+
+    // Normalize: lowercase, remove punctuation except for word boundaries, collapse spaces
+    function normalizeForMatching(str) {
+      return str
+        .replace(/[.,\/#!$%\^&\*;:{}=\-_`~()]/g,"")
+        .replace(/\s+/g, " ")
+        .trim()
+        .toLowerCase();
+    }
+
+    // Split by ... or . and clean up (NEW LOGIC: split on either period or ellipsis)
+    function splitIntoSentences(text) {
+      if (!text) return [];
+      return text.split(/(?:\.{3}|[.])/g)
+        .map(s => s.trim())
+        .filter(Boolean);
+    }
+
+    // Extract all <em>...</em> phrases and the full sentence from the highlighted match
+    function extractHighlightPhrases(highlightSource) {
+      const phrases = [];
+      if (!highlightSource) return phrases;
+      // Extract <em>...</em> phrases
+      const emMatches = [...highlightSource.matchAll(/<em>(.*?)<\/em>/gi)];
+      emMatches.forEach(m => {
+        if (m[1]) phrases.push(m[1]);
+      });
+      // Add the full sentence (strip HTML tags)
+      const tmp = document.createElement('div');
+      tmp.innerHTML = highlightSource;
+      const plain = tmp.textContent || tmp.innerText || '';
+      if (plain && !phrases.includes(plain)) {
+        phrases.push(plain);
+      }
+      // Remove duplicates, sort by length descending (to avoid partial overlaps)
+      return [...new Set(phrases)].sort((a, b) => b.length - a.length);
+    }
+
+    // Highlight all phrases in a string (case-insensitive, non-overlapping)
+    function highlightPhrases(text, phrases) {
+      if (!text || !phrases.length) return text;
+      let result = text;
+      // To avoid overlapping highlights, replace longest phrases first
+      phrases.forEach(phrase => {
+        if (!phrase) return;
+        const re = new RegExp(escapeRegExp(phrase), 'gi');
+        result = result.replace(re, match => `<em>${match}</em>`);
+      });
+      return result;
+    }
+
+    function visualizeResults(data) {
+      resultsContainer.innerHTML = "";
+      searchTermDiv.innerHTML = "";
+
+      const searchTerm = data?.["@search.nextPageParameters"]?.search;
+      if (searchTerm) {
+        searchTermDiv.innerHTML = `<strong>🔍 Search Term:</strong> <code>${searchTerm}</code>`;
+      }
+
+      const results = data?.value || [];
+      if (!results.length) {
+        resultsContainer.innerHTML = "<p>No results found in the JSON file.</p>";
+        return;
+      }
+
+      results.forEach((result, index) => {
+        const caption = result["@search.captions"]?.[0];
+        let highlightSource = "";
+        if (caption) {
+          highlightSource = caption.highlights?.trim() || caption.text || "";
+        }
+
+        // Extract highlight phrases from the Highlighted Match
+        const highlightPhrasesList = extractHighlightPhrases(highlightSource);
+
+        // Highlight in research areas and publication summary
+        const dir = highlightPhrases(result.dir_research_area || "", highlightPhrasesList);
+        const cv = highlightPhrases(result.cv_research_area || "", highlightPhrasesList);
+        const open = highlightPhrases(result.open_research_area || "", highlightPhrasesList);
+        const pub = highlightPhrases(result.publication_summary || "", highlightPhrasesList);
+
+        const html = `
+          <div class="result">
+            <h3>${result.fullname || "Unnamed"} (${result.designation || "Unknown role"})</h3>
+            <p><strong>H-index:</strong> ${result.h_index ?? "–"}, 
+               <strong>Citations:</strong> ${result.citation_count ?? "–"}</p>
+            <p><strong>Score:</strong> ${result["@search.score"]?.toFixed(3) ?? "–"}, 
+               <strong>Reranker Score:</strong> ${result["@search.rerankerScore"]?.toFixed(3) ?? "–"}</p>
+            <p><strong>Highlighted Match:</strong><br>${highlightSource || "(No highlights)"}</p>
+
+            <button class="toggle-btn" onclick="toggleCollapsible(this)">Show Research Areas</button>
+            <div class="collapsible">
+              <div><span class="field-label">Dir Research Area:</span> <span class="field-content">${dir || "–"}</span></div>
+              <div><span class="field-label">CV Research Area:</span> <span class="field-content">${cv || "–"}</span></div>
+              <div><span class="field-label">Open Research Area:</span> <span class="field-content">${open || "–"}</span></div>
+              <div><span class="field-label">Publication Summary:</span> <span class="field-content">${pub || "–"}</span></div>
+            </div>
+          </div>
+        `;
+        resultsContainer.insertAdjacentHTML("beforeend", html);
+      });
+    }
+  </script>
+</body>
+</html>
