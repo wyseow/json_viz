@@ -184,17 +184,18 @@
     function extractHighlightPhrases(highlightSource) {
       const phrases = [];
       if (!highlightSource) return phrases;
-      // Extract <em>...</em> phrases
-      const emMatches = [...highlightSource.matchAll(/<em>(.*?)<\/em>/gi)];
-      emMatches.forEach(m => {
-        if (m[1]) phrases.push(m[1]);
-      });
-      // Add the full sentence (strip HTML tags)
+      // Only add all sentences/fragments from the plain text (split by ... or .)
       const tmp = document.createElement('div');
       tmp.innerHTML = highlightSource;
       const plain = tmp.textContent || tmp.innerText || '';
-      if (plain && !phrases.includes(plain)) {
-        phrases.push(plain);
+      if (plain) {
+        // Split by ... or .
+        const fragments = plain.split(/(?:\.\.\.|[.])/g)
+          .map(s => s.trim())
+          .filter(s => s.length > 10); // Only keep meaningful fragments
+        fragments.forEach(frag => {
+          if (!phrases.includes(frag)) phrases.push(frag);
+        });
       }
       // Remove duplicates, sort by length descending (to avoid partial overlaps)
       return [...new Set(phrases)].sort((a, b) => b.length - a.length);
