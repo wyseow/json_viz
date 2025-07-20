@@ -56,6 +56,11 @@
       font-style: normal;
       font-weight: bold;
     }
+    mark {
+      background-color: orange;
+      font-style: normal;
+      font-weight: bold;
+    }
     #search-term {
       font-size: 18px;
       margin-bottom: 20px;
@@ -218,7 +223,7 @@
       phrases.forEach(phrase => {
         if (!phrase) return;
         const re = new RegExp(escapeRegExp(phrase), 'gi');
-        result = result.replace(re, match => `<em>${match}</em>`);
+        result = result.replace(re, match => `<mark>${match}</mark>`);
       });
       return result;
     }
