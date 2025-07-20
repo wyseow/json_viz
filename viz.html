@@ -190,10 +190,19 @@
       const plain = tmp.textContent || tmp.innerText || '';
       if (plain) {
         // Split by ... or .
-        const fragments = plain.split(/(?:\.\.\.|[.])/g)
+        let fragments = plain.split(/(?:\.\.\.|[.])/g)
           .map(s => s.trim())
-          .filter(s => s.length > 10); // Only keep meaningful fragments
+          .filter(s => s.length > 10);
+        // Further split at lowercase-uppercase transitions with no space/punctuation
+        let finalFragments = [];
         fragments.forEach(frag => {
+          // Split at a lowercase letter followed by an uppercase letter
+          let parts = frag.split(/(?<=[a-z])(?=[A-Z])/g);
+          parts.forEach(p => {
+            if (p.trim().length > 10) finalFragments.push(p.trim());
+          });
+        });
+        finalFragments.forEach(frag => {
           if (!phrases.includes(frag)) phrases.push(frag);
         });
       }
