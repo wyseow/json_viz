@@ -99,6 +99,13 @@
     <button id="visualize-btn">Visualize</button>
   </div>
   <div id="search-term"></div>
+  <div style="margin-bottom: 1rem;">
+    <label for="sort-select"><strong>Sort by:</strong></label>
+    <select id="sort-select">
+      <option value="@search.score">@search.score (desc)</option>
+      <option value="@search.rerankerScore">@search.rerankerScore (desc)</option>
+    </select>
+  </div>
   <div id="results"></div>
 
   <script>
@@ -228,20 +235,38 @@
       return result;
     }
 
+    let currentData = null;
+    let currentSortField = "@search.score";
+
+    document.getElementById("sort-select").addEventListener("change", function() {
+      currentSortField = this.value;
+      if (currentData) visualizeResults(currentData);
+    });
+
     function visualizeResults(data) {
       resultsContainer.innerHTML = "";
       searchTermDiv.innerHTML = "";
+
+      currentData = data;
 
       const searchTerm = data?.["@search.nextPageParameters"]?.search;
       if (searchTerm) {
         searchTermDiv.innerHTML = `<strong>🔍 Search Term:</strong> <code>${searchTerm}</code>`;
       }
 
-      const results = data?.value || [];
+      let results = data?.value || [];
       if (!results.length) {
         resultsContainer.innerHTML = "<p>No results found in the JSON file.</p>";
         return;
       }
+
+      // Sort results by the selected field, descending
+      results = results.slice().sort((a, b) => {
+        const field = currentSortField;
+        const aVal = typeof a[field] === 'number' ? a[field] : (typeof a[field] === 'string' ? parseFloat(a[field]) : -Infinity);
+        const bVal = typeof b[field] === 'number' ? b[field] : (typeof b[field] === 'string' ? parseFloat(b[field]) : -Infinity);
+        return (bVal || 0) - (aVal || 0);
+      });
 
       results.forEach((result, index) => {
         const caption = result["@search.captions"]?.[0];
