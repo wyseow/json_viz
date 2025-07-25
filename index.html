@@ -100,10 +100,19 @@
   </div>
   <div id="search-term"></div>
   <div style="margin-bottom: 1rem;">
+    <label for="reranker-threshold"><strong>Min Reranker Score:</strong></label>
+    <input type="number" id="reranker-threshold" value="2.0" step="0.1" style="width: 5em; margin-right: 1em;">
+    <label for="coef-score"><strong>Score Coef:</strong></label>
+    <input type="number" id="coef-score" value="4.4" step="0.1" style="width: 5em; margin-right: 1em;">
+    <label for="coef-cite"><strong>Cite Coef:</strong></label>
+    <input type="number" id="coef-cite" value="0.01" step="0.001" style="width: 5em; margin-right: 1em;">
+    <label for="citation-cap"><strong>Cite Cap:</strong></label>
+    <input type="number" id="citation-cap" value="15000" step="100" style="width: 6em; margin-right: 1em;">
     <label for="sort-select"><strong>Sort by:</strong></label>
     <select id="sort-select">
       <option value="@search.score">@search.score (desc)</option>
       <option value="@search.rerankerScore">@search.rerankerScore (desc)</option>
+      <option value="custom_score">Custom Score (rerankerScore + coef_score × @search.score + coef_cite × log(1 + min(citation_count, citation_cap)))</option>
     </select>
   </div>
   <div id="results"></div>
@@ -237,10 +246,33 @@
 
     let currentData = null;
     let currentSortField = "@search.score";
+    let currentCitationWeight = 0.001;
+    let currentRerankerThreshold = 2.0;
+    let currentCoefScore = 4.4;
+    let currentCoefCite = 0.01;
+    let currentCitationCap = 15000;
 
     document.getElementById("sort-select").addEventListener("change", function() {
       currentSortField = this.value;
       if (currentData) visualizeResults(currentData);
+    });
+
+    document.getElementById("reranker-threshold").addEventListener("input", function() {
+      currentRerankerThreshold = parseFloat(this.value) || 0;
+      if (currentData) visualizeResults(currentData);
+    });
+
+    document.getElementById("coef-score").addEventListener("input", function() {
+      currentCoefScore = parseFloat(this.value) || 0;
+      if (currentSortField === "custom_score" && currentData) visualizeResults(currentData);
+    });
+    document.getElementById("coef-cite").addEventListener("input", function() {
+      currentCoefCite = parseFloat(this.value) || 0;
+      if (currentSortField === "custom_score" && currentData) visualizeResults(currentData);
+    });
+    document.getElementById("citation-cap").addEventListener("input", function() {
+      currentCitationCap = parseFloat(this.value) || 0;
+      if (currentSortField === "custom_score" && currentData) visualizeResults(currentData);
     });
 
     function visualizeResults(data) {
@@ -260,12 +292,34 @@
         return;
       }
 
+      // Filter by rerankerScore threshold
+      results = results.filter(r => {
+        const rerank = typeof r["@search.rerankerScore"] === 'number' ? r["@search.rerankerScore"] : (typeof r["@search.rerankerScore"] === 'string' ? parseFloat(r["@search.rerankerScore"]) : -Infinity);
+        return rerank >= currentRerankerThreshold;
+      });
+      if (!results.length) {
+        resultsContainer.innerHTML = `<p>No results found with rerankerScore ≥ ${currentRerankerThreshold}.</p>`;
+        return;
+      }
+
       // Sort results by the selected field, descending
       results = results.slice().sort((a, b) => {
-        const field = currentSortField;
-        const aVal = typeof a[field] === 'number' ? a[field] : (typeof a[field] === 'string' ? parseFloat(a[field]) : -Infinity);
-        const bVal = typeof b[field] === 'number' ? b[field] : (typeof b[field] === 'string' ? parseFloat(b[field]) : -Infinity);
-        return (bVal || 0) - (aVal || 0);
+        if (currentSortField === "custom_score") {
+          const aRerank = typeof a["@search.rerankerScore"] === 'number' ? a["@search.rerankerScore"] : (typeof a["@search.rerankerScore"] === 'string' ? parseFloat(a["@search.rerankerScore"]) : 0);
+          const bRerank = typeof b["@search.rerankerScore"] === 'number' ? b["@search.rerankerScore"] : (typeof b["@search.rerankerScore"] === 'string' ? parseFloat(b["@search.rerankerScore"]) : 0);
+          const aScore = typeof a["@search.score"] === 'number' ? a["@search.score"] : (typeof a["@search.score"] === 'string' ? parseFloat(a["@search.score"]) : 0);
+          const bScore = typeof b["@search.score"] === 'number' ? b["@search.score"] : (typeof b["@search.score"] === 'string' ? parseFloat(b["@search.score"]) : 0);
+          const aCite = Math.min(currentCitationCap, typeof a.citation_count === 'number' ? a.citation_count : (typeof a.citation_count === 'string' ? parseFloat(a.citation_count) : 0));
+          const bCite = Math.min(currentCitationCap, typeof b.citation_count === 'number' ? b.citation_count : (typeof b.citation_count === 'string' ? parseFloat(b.citation_count) : 0));
+          const aCustom = aRerank + currentCoefScore * aScore + currentCoefCite * Math.log(1 + Math.max(0, aCite));
+          const bCustom = bRerank + currentCoefScore * bScore + currentCoefCite * Math.log(1 + Math.max(0, bCite));
+          return bCustom - aCustom;
+        } else {
+          const field = currentSortField;
+          const aVal = typeof a[field] === 'number' ? a[field] : (typeof a[field] === 'string' ? parseFloat(a[field]) : -Infinity);
+          const bVal = typeof b[field] === 'number' ? b[field] : (typeof b[field] === 'string' ? parseFloat(b[field]) : -Infinity);
+          return (bVal || 0) - (aVal || 0);
+        }
       });
 
       results.forEach((result, index) => {
@@ -285,13 +339,24 @@
         const pub = highlightPhrases(result.publication_summary || "", highlightPhrasesList);
         const grants = highlightPhrases(result.awarded_grants_str || "", highlightPhrasesList);
 
+        // Compute custom score if needed
+        let customScore = null;
+        if (currentSortField === "custom_score") {
+          const rerank = typeof result["@search.rerankerScore"] === 'number' ? result["@search.rerankerScore"] : (typeof result["@search.rerankerScore"] === 'string' ? parseFloat(result["@search.rerankerScore"]) : 0);
+          const score = typeof result["@search.score"] === 'number' ? result["@search.score"] : (typeof result["@search.score"] === 'string' ? parseFloat(result["@search.score"]) : 0);
+          const cite = Math.min(currentCitationCap, typeof result.citation_count === 'number' ? result.citation_count : (typeof result.citation_count === 'string' ? parseFloat(result.citation_count) : 0));
+          customScore = rerank + currentCoefScore * score + currentCoefCite * Math.log(1 + Math.max(0, cite));
+        }
+
         const html = `
           <div class="result">
             <h3>${result.fullname || "Unnamed"} (${result.designation || "Unknown role"})</h3>
             <p><strong>H-index:</strong> ${result.h_index ?? "–"}, 
                <strong>Citations:</strong> ${result.citation_count ?? "–"}</p>
             <p><strong>Score:</strong> ${result["@search.score"]?.toFixed(3) ?? "–"}, 
-               <strong>Reranker Score:</strong> ${result["@search.rerankerScore"]?.toFixed(3) ?? "–"}</p>
+               <strong>Reranker Score:</strong> ${result["@search.rerankerScore"]?.toFixed(3) ?? "–"}
+              ${currentSortField === "custom_score" ? `, <strong>Custom Score:</strong> ${customScore !== null ? customScore.toFixed(3) : "–"}` : ""}
+            </p>
             <p><strong>Highlighted Match:</strong><br>${highlightSource || "(No highlights)"}</p>
 
             <button class="toggle-btn" onclick="toggleCollapsible(this)">Show Research Areas</button>
